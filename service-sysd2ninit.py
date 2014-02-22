@@ -14,7 +14,8 @@ class SystemdODict(OrderedDict):
 			 'Wants','BindsTo', 'PartOf','Conflicts','Before',
 			 'After','OnFailure','PropagatesReloadTo','ReloadPropagatedFrom',
 			 'JoinsNamespaceOf','Alias','WantedBy','RequiredBy','Also',
-			 'ReadWriteDirectories', 'ReadOnlyDirectories', 'InaccessibleDirectories')
+			 'ReadWriteDirectories', 'ReadOnlyDirectories', 'InaccessibleDirectories',
+			 'SupplementaryGroups')
 	UNNEEDED_DEPS=['network.target','network-online.target','umount.target','basic.target']
 	def __setitem__(self, key, value):
 		if isinstance(value, list) and key in self:
@@ -127,7 +128,7 @@ def ninit_service(cfg,f):
 			run_file.write('\n'.join(cmd)) #write bindto stuff here?
 			run_file.close()
 			st=os.stat(runpath)
-			os.chmod(run_file,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
+			os.chmod(runpath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
 		else:
 			cmd_parts=shlex.split(cmd[0])
 			runpath=path.join(newf,'run')
@@ -144,18 +145,49 @@ def ninit_service(cfg,f):
 		if 'ExecStartPost' in cfg['Service']:
 			end.extend(cfg['Service']['ExecStartPost'])
 		#handle ExecStop and ExecStopPost how? I think by writing that special run file, but idk
-		
 		if 'EnvironmentFile' in cfg['Service']:
 			import shutil
 			shutil.copy(cfg['Service']['EnvironmentFile'][0],path.join(newf,'environ'))
 		elif 'Environment' in cfg['Service']:
 			environ=cfg['Service']['Environment'][0]
+			if 'WorkingDirectory' in cfg['Service']:
+				environ.append('PWD={}'.format(cfg['Service']['WorkingDirectory'][0]))
 			environ='\n'.join(shlex.split(environ))
 			environ_file=open(path.join(newf,'environ'),'w')
 			environ_file.write(environ)
 			environ_file.close()
 		
-		if 'Restart' in cfg['Service']:
+		if 'User' in cfg['Service']:
+			try:
+				uid=int(cfg['Service']['User'][0])
+			except ValueError as e:
+				from pwd import getpwnam
+				uid=getpwnam(cfg['Service']['User'][0]).pw_uid
+			if 'Group' in cfg['Service']:
+				try:
+					gid=int(cfg['Service']['Group'][0])
+				except ValueError as e:
+					from grp import getgrnam
+					gid=getgrnam(cfg['Service']['Group'][0]).gr_gid
+			else:
+				from pw import getpwuid
+				gid=getpwuid(uid).gr_gid
+			more_gids=[]
+			if 'SupplementaryGroups' in cfg['Service']:
+				for i in cfg['Service']['SupplementaryGroups']:
+					try:
+						ggid=int(i)
+					except ValueError as e:
+						from grp import getgrnam
+						ggid=getgrnam(i).gr_gid
+					more_gids.append(ggid)
+			uid_file=open(path.join(newf,'uid'),'w')
+			uid_file.write("{}:{}{}".format(uid,gid,
+						":{}".format(":".join(more_gids)) \
+						if len(more_gids) > 0 else ""))
+			uid_file.close()
+		
+		if cfg['Service'].get('Restart',['no'])[0] != 'no':
 			respawn_file=open(path.join(newf,'respawn'),'w')
 			respawn_file.write('')
 			respawn_file.close()
@@ -164,6 +196,27 @@ def ninit_service(cfg,f):
 			sleep_file=open(path.join(newf,'sleep'),'w')
 			sleep_file.write(sleep)
 			sleep_file.close()
+
+	if len(end) > 0:
+		import stat
+		endpath=path.join(newf,'end')
+		end_file=open(endpath,'w')
+		end_file.write('#!/bin/sh\n')
+		end_file.write('\n'.join(end)) #write bindto stuff here?
+		end_file.close()
+		st=os.stat(endpath)
+		os.chmod(endpath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
+	
+	if len(setup) > 0:
+		import stat
+		setuppath=path.join(newf,'setup')
+		setup_file=open(setuppath,'w')
+		setup_file.write('#!/bin/sh\n')
+		setup_file.write('\n'.join(setup)) #write bindto stuff here?
+		setup_file.close()
+		st=os.stat(setuppath)
+		os.chmod(setuppath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
+
 	elif 'Socket' in cfg:
 		#we only care about file listen streams
 		pass
