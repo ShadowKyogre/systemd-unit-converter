@@ -4,8 +4,12 @@ import glob
 import shlex
 from os import path
 import os
+import re
 from itertools import chain
 from collections import OrderedDict
+
+#for now, we don't want these prefixes
+cmd_prefix=re.compile('^[@-]{1,2}')
 
 #Special Dictionary to deal with how systemd unit files are structured
 
@@ -66,11 +70,18 @@ def ninit_service(cfg,f):
 		depends.extend([path.splitext(path.basename(n))[0] for n in glob.iglob(etcwants)])
 	if 'Requisite' in cfg['Unit']:
 		depends.extend(cfg['Unit']['Requisite']) #how does ninit handle failing dependencies?
+		#add some nsvc -g <Requisite> to the setup or run script and prevent it from running if otherwise?
 	if 'BindsTo' in cfg['Unit']:
 		depends.extend(cfg['Unit']['BindsTo'])
-		#be sure to tell the script later to write a special run?
+		#be sure to tell the script later to write a special run or end file?
 	if 'PartOf' in cfg['Unit']:
 		depends.extend(cfg['Unit']['PartOf'])
+	if 'Conflicts' in cfg['Unit']:
+		#check in setup if any of the conflicting services are here
+		pass
+	if 'OnFailure' in cfg['Unit']:
+		#check if our service failed fantastically in end and launch those if we durped
+		pass
 
 	## Check any Conditionals and write those to a special setup file
 	setup=[]
@@ -103,7 +114,7 @@ def ninit_service(cfg,f):
 				if d in depends: depends.remove(d)
 			
 			#if they're specified in after, write them to depends
-			depends_file= open(path.join(newf,'depends'),'w')
+			depends_file=open(path.join(newf,'depends'),'w')
 			depends_file.write('\n'.join([path.splitext(i)[0] for i in depends]))
 			
 			#if they're specified in before, write them to a special end file
@@ -120,12 +131,24 @@ def ninit_service(cfg,f):
 		cmd=cfg['Service'].get('ExecStart',[''])
 		#strip - and @ at the beginning
 		cmd_length=len(cmd)
-		if (';' in cmd and cmd_length == 1) or cmd_length > 1:
+		if 'ExecStop' in cfg['Service'] or (';' in cmd and cmd_length == 1) or cmd_length > 1:
 			import stat
 			runpath=path.join(newf,'run')
 			run_file=open(runpath,'w')
 			run_file.write('#!/bin/sh\n')
-			run_file.write('\n'.join(cmd)) #write bindto stuff here?
+			if 'ExecStop' in cfg['Service']:
+				if len(cfg['Service']['ExecStop']) > 1:
+					run_file.write("trap './stop' SIGTERM\n")
+					stop_path=path.join(newf,'stop')
+					stop_file=open(stop_path,'w')
+					stop_file.write('#!/bin/sh\n')
+					stop_file.write([cmd_prefix.sub('',c) for c in cfg['Service']['ExecStop']])
+					stop_file.close()
+				else:
+					stopcmd=cmd_prefix.sub('',cfg['Service']['ExecStop'][0])
+					run_file.write("trap {} SIGTERM\n".format(shlex.quote(stopcmd)))
+			run_file.write
+			run_file.write('\n'.join([cmd_prefix.sub('',c) for c in cmd])) #write bindto stuff here?
 			run_file.close()
 			st=os.stat(runpath)
 			os.chmod(runpath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
@@ -134,7 +157,7 @@ def ninit_service(cfg,f):
 			runpath=path.join(newf,'run')
 			if path.exists(runpath):
 				os.remove(runpath)
-			os.symlink(cmd_parts[0],runpath)
+			os.symlink(cmd_prefix.sub('',cmd_parts[0]),runpath)
 			params=open(path.join(newf,'params'),'w')
 			params.write('\n'.join(cmd_parts[1:]))
 			params.close()
@@ -202,7 +225,7 @@ def ninit_service(cfg,f):
 		endpath=path.join(newf,'end')
 		end_file=open(endpath,'w')
 		end_file.write('#!/bin/sh\n')
-		end_file.write('\n'.join(end)) #write bindto stuff here?
+		end_file.write('\n'.join([cmd_prefix.sub('',c) for c in end])) #write bindto stuff here?
 		end_file.close()
 		st=os.stat(endpath)
 		os.chmod(endpath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
@@ -212,7 +235,7 @@ def ninit_service(cfg,f):
 		setuppath=path.join(newf,'setup')
 		setup_file=open(setuppath,'w')
 		setup_file.write('#!/bin/sh\n')
-		setup_file.write('\n'.join(setup)) #write bindto stuff here?
+		setup_file.write('\n'.join([cmd_prefix.sub('',c) for c in setup])) #write bindto stuff here?
 		setup_file.close()
 		st=os.stat(setuppath)
 		os.chmod(setuppath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
