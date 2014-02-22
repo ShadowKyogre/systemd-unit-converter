@@ -13,7 +13,8 @@ class SystemdODict(OrderedDict):
 	PILE_ME_UP=('Requires','RequiresOverrideable','Requisite',
 			 'Wants','BindsTo', 'PartOf','Conflicts','Before',
 			 'After','OnFailure','PropagatesReloadTo','ReloadPropagatedFrom',
-			 'JoinsNamespaceOf','Alias','WantedBy','RequiredBy','Also')
+			 'JoinsNamespaceOf','Alias','WantedBy','RequiredBy','Also',
+			 'ReadWriteDirectories', 'ReadOnlyDirectories', 'InaccessibleDirectories')
 	UNNEEDED_DEPS=['network.target','network-online.target','umount.target','basic.target']
 	def __setitem__(self, key, value):
 		if isinstance(value, list) and key in self:
@@ -149,7 +150,7 @@ def ninit_service(cfg,f):
 			shutil.copy(cfg['Service']['EnvironmentFile'][0],path.join(newf,'environ'))
 		elif 'Environment' in cfg['Service']:
 			environ=cfg['Service']['Environment'][0]
-			environ=environ.replace(' ','\n')
+			environ='\n'.join(shlex.split(environ))
 			environ_file=open(path.join(newf,'environ'),'w')
 			environ_file.write(environ)
 			environ_file.close()
