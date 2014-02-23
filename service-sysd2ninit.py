@@ -19,9 +19,11 @@ class SystemdODict(OrderedDict):
 			 'After','OnFailure','PropagatesReloadTo','ReloadPropagatedFrom',
 			 'JoinsNamespaceOf','Alias','WantedBy','RequiredBy','Also',
 			 'ReadWriteDirectories', 'ReadOnlyDirectories', 'InaccessibleDirectories',
-			 'SupplementaryGroups')
+			 'SupplementaryGroups','ExecReload','ExecStartPre','ExecStartPost','ExecStop',
+			 'ExecStopPost',)
 	UNNEEDED_DEPS=['network.target','network-online.target','umount.target','basic.target']
 	def __setitem__(self, key, value):
+		print(value)
 		if isinstance(value, list) and key in self:
 			self[key].extend(value)
 		else:
@@ -124,14 +126,20 @@ def ninit_service(cfg,f):
 		
 		if cfg['Service'].get('PIDFile',[''])[0] != '':
 			pidfile=open(path.join(newf,'pidfile'),'w')
-			pidfile.write(cfg['Service']['PIDFile'])
+			pidfile.write(cfg['Service']['PIDFile'][0])
 			pidfile.close()
 		
 		#support multiple ExecStart in the case of oneshots
 		cmd=cfg['Service'].get('ExecStart',[''])
 		#strip - and @ at the beginning
 		cmd_length=len(cmd)
-		if 'ExecStop' in cfg['Service'] or (';' in cmd and cmd_length == 1) or cmd_length > 1:
+		#get this out of the way
+
+		reload_start=shlex.split(cfg['Service'].get('ExecReload',['/bin/kill'])[0])[0]
+		does_not_handle_sighup=path.basename(reload_start) != 'kill'
+		if 'ExecStop' in cfg['Service'] or \
+			(does_not_handle_sighup and sertype != 'oneshot') or \
+			(';' in cmd and cmd_length == 1) or cmd_length > 1:
 			import stat
 			runpath=path.join(newf,'run')
 			run_file=open(runpath,'w')
@@ -142,11 +150,26 @@ def ninit_service(cfg,f):
 					stop_path=path.join(newf,'stop')
 					stop_file=open(stop_path,'w')
 					stop_file.write('#!/bin/sh\n')
-					stop_file.write([cmd_prefix.sub('',c) for c in cfg['Service']['ExecStop']])
+					stop_file.write('\n'.join([cmd_prefix.sub('',c) \
+									for c in cfg['Service']['ExecStop']]))
 					stop_file.close()
 				else:
 					stopcmd=cmd_prefix.sub('',cfg['Service']['ExecStop'][0])
 					run_file.write("trap {} SIGTERM\n".format(shlex.quote(stopcmd)))
+			#if there's an execreload specified in the file, does this imply it DOESN'T
+			#handle sighup to reload?
+			if (does_not_handle_sighup and sertype != 'oneshot'):
+				if len(cfg['Service']['ExecReload']) > 1:
+					run_file.write("trap './reload' SIGHUP\n")
+					reload_path=path.join(newf,'reload')
+					reload_file=open(reload_path,'w')
+					reload_file.write('#!/bin/sh\n')
+					reload_file.write('\n'.join([cmd_prefix.sub('',c) \
+									for c in cfg['Service']['ExecReload']]))
+					reload_file.close()
+				else:
+					reloadcmd=cmd_prefix.sub('',cfg['Service']['ExecReload'][0])
+					run_file.write("trap {} SIGHUP\n".format(shlex.quote(reloadcmd)))
 			run_file.write
 			run_file.write('\n'.join([cmd_prefix.sub('',c) for c in cmd])) #write bindto stuff here?
 			run_file.close()
@@ -272,6 +295,6 @@ else:
 #/usr/lib/systemd/system/wicd.service
 for f in files:
 	with open(f, 'r') as service_file:
-		cfg = configparser.RawConfigParser(dict_type=SystemdODict)
+		cfg = configparser.RawConfigParser(dict_type=SystemdODict,strict=False)
 		cfg.read_file(service_file)
 		ninit_service(cfg,f)
