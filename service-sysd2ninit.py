@@ -19,8 +19,7 @@ class SystemdODict(OrderedDict):
 			 'After','OnFailure','PropagatesReloadTo','ReloadPropagatedFrom',
 			 'JoinsNamespaceOf','Alias','WantedBy','RequiredBy','Also',
 			 'ReadWriteDirectories', 'ReadOnlyDirectories', 'InaccessibleDirectories',
-			 'SupplementaryGroups','ExecReload','ExecStartPre','ExecStartPost','ExecStop',
-			 'ExecStopPost',)
+			 'SupplementaryGroups')
 	UNNEEDED_DEPS=['network.target','network-online.target','umount.target','basic.target']
 	def __setitem__(self, key, value):
 		print(value)
@@ -28,7 +27,7 @@ class SystemdODict(OrderedDict):
 			self[key].extend(value)
 		else:
 			if key in self.PILE_ME_UP:
-				value=value.split(' ')
+				value=shlex.split(' ')
 			#print(key,value)
 			super(OrderedDict, self).__setitem__(key, value)
 
