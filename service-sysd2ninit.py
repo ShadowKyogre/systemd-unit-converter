@@ -129,11 +129,11 @@ def ninit_service(cfg,f):
 			pidfile.close()
 		
 		#support multiple ExecStart in the case of oneshots
-		cmd=cfg['Service'].get('ExecStart',[''])
+		cmd=list(filter(('').__ne__, cfg['Service'].get('ExecStart',[''])))
 		#strip - and @ at the beginning
 		cmd_length=len(cmd)
 		#get this out of the way
-
+		
 		reload_start=shlex.split(cfg['Service'].get('ExecReload',['/bin/kill'])[0])[0]
 		does_not_handle_sighup=path.basename(reload_start) != 'kill'
 		if 'ExecStop' in cfg['Service'] or \
@@ -174,7 +174,7 @@ def ninit_service(cfg,f):
 			run_file.close()
 			st=os.stat(runpath)
 			os.chmod(runpath,st.st_mode|stat.S_IXUSR|stat.S_IXGRP|stat.S_IXOTH)
-		else:
+		elif cmd_length == 1:
 			cmd_parts=shlex.split(cmd[0])
 			runpath=path.join(newf,'run')
 			if path.exists(runpath):
@@ -275,8 +275,12 @@ def ninit_service(cfg,f):
 	elif 'Swap' in cfg:
 		#output to args.output/fstab.addons
 		pass
-	#elif 'Path' in cfg:
-	#	pass
+	elif 'Path' in cfg:
+		#write to the args.output/incron.addons
+		pass
+	elif 'Timer' in cfg:
+		#write to the args.output/cron.addons
+		pass
 	print(f,"->",newf)
 
 parser = argparse.ArgumentParser(description='Convert systemd files to ninit service directories')
